@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="8e6999de-eac3-4617-956c-95e3975a8256" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="274501b9-66e0-4680-b4fb-17dae316b66c" />
+	<kafka:consumer-config name="Apache_Kafka_Consumer_configuration_Universities" doc:name="Apache Kafka Consumer configuration" doc:id="5bafc0c0-d2fc-430a-a845-a8814e99a5ba" >
+		<kafka:consumer-plaintext-connection >
+			<kafka:bootstrap-servers >
+				<kafka:bootstrap-server value='localhost:9100' />
+			</kafka:bootstrap-servers>
+			<kafka:topic-patterns >
+				<kafka:topic-pattern value="info" />
+			</kafka:topic-patterns>
+		</kafka:consumer-plaintext-connection>
+	</kafka:consumer-config>
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="1383dc92-136b-4e29-b5ab-e89b87210f56" >
+		<db:my-sql-connection host="localhost" port="9105" user="user" password="password" database="myDatabase" />
+	</db:config>
+	<kafka:consumer-config name="Apache_Kafka_Consumer_configuration_Netflix" doc:name="Apache Kafka Consumer configuration" doc:id="ebf8bec8-6ccb-4f61-acff-646f5aca9114" >
+		<kafka:consumer-plaintext-connection >
+			<kafka:bootstrap-servers >
+				<kafka:bootstrap-server value='localhost:9100'/>
+			</kafka:bootstrap-servers>
+			<kafka:topic-patterns >
+				<kafka:topic-pattern value="all_Netflix" />
+			</kafka:topic-patterns>
+		</kafka:consumer-plaintext-connection>
+	</kafka:consumer-config>
+	<kafka:producer-config name="Apache_Kafka_Producer_configuration" doc:name="Apache Kafka Producer configuration" doc:id="f7efe53d-8f22-4561-a446-9e6a70ff3d5a" >
+		<kafka:producer-plaintext-connection>
+			<kafka:bootstrap-servers >
+				<kafka:bootstrap-server value='#["localhost:9100"]' />
+			</kafka:bootstrap-servers>
+		</kafka:producer-plaintext-connection>
+	</kafka:producer-config>
+	<flow name="get-and-publish-API" doc:id="d0669a95-fa87-44bd-b993-abe526d2ff44" >
+		<http:listener doc:name="Listener" doc:id="e88dc7c1-b396-4bb3-a57d-40f45573c9e0" config-ref="HTTP_Listener_config" path="/publish_data"/>
+		<http:request method="GET" doc:name="Request" doc:id="9fb9c655-88d3-47fa-9907-8790f29f452d" config-ref="HTTP_Request_configuration" url="http://universities.hipolabs.com/search?country=United+States"/>
+		<kafka:publish doc:name="Publish" doc:id="5864c100-29e6-43f6-b3b0-b87669d29ecd" topic="info" target="response" config-ref="Apache_Kafka_Producer_configuration"/>
+	</flow>
+	<flow name="modify-and-re-publish-API" doc:id="46d82086-38fa-4eb9-ab03-9104888a490d" >
+		<kafka:message-listener doc:name="Message listener" doc:id="d74782b8-bc49-4a18-9298-2fc743077418" config-ref="Apache_Kafka_Consumer_configuration_Universities"/>
+		<logger level="INFO" doc:name="Logger" doc:id="db784953-1f87-4bf8-83c8-44338628f99d" message='#["Message received"]'/>
+		<set-payload value="#[payload]" doc:name="Set Payload" doc:id="0e11de77-0a93-442d-b546-68d1af6bdbc5" mimeType="application/json" />
+		<ee:transform doc:name="Transform Message" doc:id="433173f3-c7b8-4a91-9df5-ca7a526eb28b" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload filter ((value, index) -> value.name startsWith("Ala"))]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="a1d8cf75-a64e-4808-b0c4-a15983602b14" message="#[payload]"/>
+		<kafka:publish doc:name="Publish" doc:id="1955b342-d45f-4719-884e-8208b6979e32" topic="info_modified" config-ref="Apache_Kafka_Producer_configuration"/>
+	</flow>
+	<flow name="get-and-publish-DB" doc:id="aa442d76-c242-4ea4-9744-dd71386fe3c7" initialState="started">
+		<scheduler doc:name="Scheduler" doc:id="51976aca-bbd1-4450-8b3c-1ed64736188b" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="1" timeUnit="MINUTES"/>
+			</scheduling-strategy>
+		</scheduler>
+		<db:select doc:name="Select" doc:id="c4923892-dc39-43a6-b537-cfd6f4bdd9f5" config-ref="Database_Config">
+			<db:sql><![CDATA[SELECT *
+FROM NetflixData
+LIMIT 100
+]]></db:sql>
+		</db:select>
+		<ee:transform doc:name="Transform Message" doc:id="eb0a9418-476c-4781-a366-203808c3a25d" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<kafka:publish doc:name="Publish" doc:id="a258eed7-2bf9-40a0-a2f5-9c3ca6f7742d" topic="all_Netflix" config-ref="Apache_Kafka_Producer_configuration"/>
+	</flow>
+	<flow name="modify-and-re-publish-DB" doc:id="d17842a6-3232-41b9-aadf-4be995bc6ab8" initialState="started">
+		<kafka:message-listener doc:name="Message listener" doc:id="b3fb8dee-d2d4-402d-bbb2-ba7833072b11" config-ref="Apache_Kafka_Consumer_configuration_Netflix"/>
+		<set-payload value="#[payload]" doc:name="Set Payload" doc:id="ac57fc79-04d6-4261-8c63-b19213e27c55" mimeType="application/json"/>
+		<ee:transform doc:name="Transform Message" doc:id="3b33f20b-e196-427d-b6db-7c2c05641fae" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload filter ((value, index) -> value."type" == "Movie")]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<kafka:publish doc:name="Publish" doc:id="c979922d-0620-4b3a-92d6-6145dd1e9a87" topic="only_movies_Netflix" config-ref="Apache_Kafka_Producer_configuration"/>
+	</flow>
+</mule>
